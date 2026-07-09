@@ -2,9 +2,12 @@ name: Daily NOAA NAO Fetcher
 
 on:
   schedule:
-    # Runs every day at 19:00 UTC (Adjust as needed based on NOAA updates)
+    # Runs every day at 19:00 UTC
     - cron: '0 19 * * *'
   workflow_dispatch: # Allows you to manually trigger it via the GitHub UI
+
+permissions:
+  contents: write
 
 jobs:
   run-script:
