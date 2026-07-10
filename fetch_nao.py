@@ -11,7 +11,7 @@ def archive_intervals_from_tidy_csv():
         df = pd.read_csv(FORECAST_URL)
         df.columns = df.columns.str.strip()
         
-        # 2. Find the absolute latest forecast run date (e.g., 2026-07-08)
+        # 2. Find the absolute latest forecast run date
         latest_run_date = df['time'].max()
         
         # 3. Isolate that run, and grab only lead times 1 through 7 days ahead
@@ -22,11 +22,12 @@ def archive_intervals_from_tidy_csv():
             print(f"No forecast data found for run date: {latest_run_date}")
             return
             
-        # 4. Collapse the 31 ensemble members into min, max, and mean intervals
+        # 4. Collapse the 31 ensemble members into min, max, mean, and variance
         archive_chunk = seven_day_forecasts.groupby(['time', 'valid_time', 'lead'])['nao_index'].agg(
             interval_low='min',
             interval_high='max',
-            ensemble_mean='mean'
+            ensemble_mean='mean',
+            ensemble_variance='var'
         ).reset_index()
         
         # Rename columns to be perfectly intuitive for your archive
@@ -39,14 +40,14 @@ def archive_intervals_from_tidy_csv():
         # 5. Save/Append to your permanent dataset
         if not os.path.exists(MASTER_LOG_FILE):
             archive_chunk.to_csv(MASTER_LOG_FILE, index=False)
-            print(f"Created fresh archive with intervals for run: {latest_run_date}")
+            print(f"Created fresh archive with variance for run: {latest_run_date}")
         else:
             master_df = pd.read_csv(MASTER_LOG_FILE)
             if latest_run_date in master_df['init_date'].astype(str).values:
                 print(f"Forecast run {latest_run_date} is already archived. Skipping.")
             else:
                 archive_chunk.to_csv(MASTER_LOG_FILE, mode='a', header=False, index=False)
-                print(f"Successfully logged 7-day prediction intervals for run: {latest_run_date}")
+                print(f"Successfully logged 7-day prediction data with variance for run: {latest_run_date}")
                 
     except Exception as e:
         print(f"Error processing data: {e}")
