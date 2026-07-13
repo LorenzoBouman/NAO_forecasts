@@ -23,7 +23,7 @@ jobs:
 
     - name: Benodigde bibliotheken installeren
       run: |
-        pip install pandas requests
+        pip install pandas requests numpy
 
     - name: Start NAO Script
       run: python fetch_nao.py
