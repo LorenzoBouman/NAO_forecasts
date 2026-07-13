@@ -1,37 +1,40 @@
-name: Daily NOAA NAO Fetcher
+name: Daily NOAA & Schiphol Fetcher
 
 on:
   schedule:
-    # Runs every day at 19:00 UTC
+    # Draait elke dag om 19:00 UTC
     - cron: '0 19 * * *'
-  workflow_dispatch: # Allows you to manually trigger it via the GitHub UI
+  workflow_dispatch: # Zodat je hem ook handmatig kunt starten via de knop
 
 permissions:
   contents: write
 
 jobs:
-  run-script:
+  run-scripts:
     runs-on: ubuntu-latest
     steps:
-    - name: Check out repository code
+    - name: Code ophalen uit repository
       uses: actions/checkout@v3
 
-    - name: Set up Python
+    - name: Python instellen
       uses: actions/setup-python@v4
       with:
         python-version: '3.10'
 
-    - name: Install dependencies
+    - name: Benodigde bibliotheken installeren
       run: |
-        pip install pandas
+        pip install pandas requests
 
-    - name: Run Python script
+    - name: Start NAO Script
       run: python fetch_nao.py
 
-    - name: Commit and push changes
+    - name: Start Schiphol Script
+      run: python fetch_schiphol.py
+
+    - name: Wijzigingen opslaan en pushen naar GitHub
       run: |
         git config --global user.name "GitHub Action"
         git config --global user.email "actions@github.com"
-        git add nao_7day_intervals_archive.csv || true
-        git commit -m "Automated daily NOAA archive update" || true
+        git add *.csv || true
+        git commit -m "Automatische dagelijkse update: NOAA & Schiphol" || true
         git push || true
