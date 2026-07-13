@@ -8,7 +8,7 @@ LAT = "52.3081"
 LON = "4.7642"
 
 # 自由 URL gecorrigeerd: 'models=' is volledig weggehaald zodat hij automatisch het gratis GEFS-ensemble pakt
-URL = f"https://ensemble-api.open-meteo.com/v1/ensemble?latitude={LAT}&longitude={LON}&hourly=temperature_2m,wind_speed_10m,wind_direction_10m&forecast_days=7"
+URL = f"https://ensemble-api.open-meteo.com/v1/ensemble?latitude={LAT}&longitude={LON}&hourly=temperature_2m,wind_speed_10m,wind_direction_10m&forecast_days=8"
 
 def archive_schiphol_weather():
     try:
