@@ -78,35 +78,35 @@ def archive_schiphol_segmented():
                 target_df[m_id] = (np.rad2deg(np.arctan2(sin_mean, cos_mean)) % 360)
 
         # --- 4. SAMENVATTEN EN CSV'S BOUWEN ---
-        # A. Temperatuur CSV
+        # A. Temperatuur CSV (🟢 .dt.strftime verwijderd omdat het al een string is)
         t_m = process_ensemble_stats(temp_m_mean, init_date)
         t_a = process_ensemble_stats(temp_a_mean, init_date)
         t_e = process_ensemble_stats(temp_e_mean, init_date)
         t_x = process_ensemble_stats(temp_max, init_date)
         
-        t_final = pd.DataFrame({'init_date': t_m['init_date'], 'forecast_date': t_m['forecast_date'].dt.strftime('%Y-%m-%d'), 'lead_time_days': t_m['lead_time_days']})
+        t_final = pd.DataFrame({'init_date': t_m['init_date'], 'forecast_date': t_m['forecast_date'], 'lead_time_days': t_m['lead_time_days']})
         for df_part, p in [(t_m, 'morning_mean'), (t_a, 'afternoon_mean'), (t_e, 'evening_mean'), (t_x, 'daily_max')]:
             for stat in ['low', 'high', 'mean', 'var']:
                 t_final[f'{p}_{stat}'] = df_part[stat].values
         save_to_csv(t_final.sort_values('lead_time_days'), 'schiphol_temperature_archive.csv')
 
-        # B. Windsnelheid CSV
+        # B. Windsnelheid CSV (🟢 .dt.strftime verwijderd)
         w_m = process_ensemble_stats(wind_m_max, init_date)
         w_a = process_ensemble_stats(wind_a_max, init_date)
         w_e = process_ensemble_stats(wind_e_max, init_date)
         
-        w_final = pd.DataFrame({'init_date': w_m['init_date'], 'forecast_date': w_m['forecast_date'].dt.strftime('%Y-%m-%d'), 'lead_time_days': w_m['lead_time_days']})
+        w_final = pd.DataFrame({'init_date': w_m['init_date'], 'forecast_date': w_m['forecast_date'], 'lead_time_days': w_m['lead_time_days']})
         for df_part, p in [(w_m, 'morning_max'), (w_a, 'afternoon_max'), (w_e, 'evening_max')]:
             for stat in ['low', 'high', 'mean', 'var']:
                 w_final[f'{p}_{stat}'] = df_part[stat].values
         save_to_csv(w_final.sort_values('lead_time_days'), 'schiphol_wind_speed_archive.csv')
 
-        # C. Windrichting CSV
+        # C. Windrichting CSV (🟢 .dt.strftime verwijderd)
         d_m = process_ensemble_stats(dir_m_avg, init_date)
         d_a = process_ensemble_stats(dir_a_avg, init_date)
         d_e = process_ensemble_stats(dir_e_avg, init_date)
         
-        d_final = pd.DataFrame({'init_date': d_m['init_date'], 'forecast_date': d_m['forecast_date'].dt.strftime('%Y-%m-%d'), 'lead_time_days': d_m['lead_time_days']})
+        d_final = pd.DataFrame({'init_date': d_m['init_date'], 'forecast_date': d_m['forecast_date'], 'lead_time_days': d_m['lead_time_days']})
         for df_part, p in [(d_m, 'morning_dir'), (d_a, 'afternoon_dir'), (d_e, 'evening_dir')]:
             for stat in ['low', 'high', 'mean', 'var']:
                 d_final[f'{p}_{stat}'] = df_part[stat].values
