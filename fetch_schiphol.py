@@ -36,6 +36,7 @@ def save_to_csv(df_chunk, filename):
 
 def archive_schiphol_segmented():
     try:
+        # 1. Data ophalen
         response = requests.get(URL)
         df_hourly = pd.DataFrame(response.json()["hourly"])
         df_hourly['time'] = pd.to_datetime(df_hourly['time'])
@@ -43,7 +44,14 @@ def archive_schiphol_segmented():
         df_hourly['hour'] = df_hourly['time'].dt.hour
         
         init_date = datetime.utcnow().strftime('%Y-%m-%d')
-        num_members = len([c for c in df_hourly.columns if c.startswith("temperature_2m_member")])
+        
+        # 2. DYNAMISCH ENSEMBLE-MEMBERS DETECTEREN
+        # We kijken welke extensies er achter 'temperature_2m' staan (bijv. '', '_member01', '_member02')
+        suffixes = [c.replace("temperature_2m", "") for c in df_hourly.columns if c.startswith("temperature_2m")]
+        
+        if not suffixes:
+            print("Fout: Geen ensemble kolommen gevonden in de data van Open-Meteo.")
+            return
         
         # Tijdsblokken definiëren
         df_morning = df_hourly[(df_hourly['hour'] >= 6) & (df_hourly['hour'] < 12)]
@@ -55,61 +63,81 @@ def archive_schiphol_segmented():
         wind_m_max, wind_a_max, wind_e_max = pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
         dir_m_avg, dir_a_avg, dir_e_avg = pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
-        for m in range(num_members):
-            t_col, ws_col, wd_col = f"temperature_2m_member{m}", f"wind_speed_10m_member{m}", f"wind_direction_10m_member{m}"
-            m_id = f"m{m}"
+        # Loop door de live gevonden members heen
+        for i, suff in enumerate(suffixes):
+            t_col = f"temperature_2m{suff}"
+            ws_col = f"wind_speed_10m{suff}"
+            wd_col = f"wind_direction_10m{suff}"
+            m_id = f"m{i}"
             
-            # --- 1. TEMPERATUUR VERWERKEN ---
-            temp_m_mean[m_id] = df_morning.groupby('forecast_date')[t_col].mean()
-            temp_a_mean[m_id] = df_afternoon.groupby('forecast_date')[t_col].mean()
-            temp_e_mean[m_id] = df_evening.groupby('forecast_date')[t_col].mean()
-            temp_max[m_id] = df_hourly.groupby('forecast_date')[t_col].max()
-            
-            # --- 2. WINDSNELHEID VERWERKEN ---
-            wind_m_max[m_id] = df_morning.groupby('forecast_date')[ws_col].max()
-            wind_a_max[m_id] = df_afternoon.groupby('forecast_date')[ws_col].max()
-            wind_e_max[m_id] = df_evening.groupby('forecast_date')[ws_col].max()
-            
-            # --- 3. WINDRICHTING VERWERKEN (Trigonometrisch) ---
-            for df_p, target_df in [(df_morning, dir_m_avg), (df_afternoon, dir_a_avg), (df_evening, dir_e_avg)]:
-                rad = np.deg2rad(df_p[wd_col])
-                sin_mean = np.sin(rad).groupby(df_p['forecast_date']).mean()
-                cos_mean = np.cos(rad).groupby(df_p['forecast_date']).mean()
-                target_df[m_id] = (np.rad2deg(np.arctan2(sin_mean, cos_mean)) % 360)
+            # Controleer of de wind- en richtingkolommen ook bestaan met dit achtervoegsel
+            if t_col in df_hourly.columns and ws_col in df_hourly.columns and wd_col in df_hourly.columns:
+                # --- TEMPERATUUR ---
+                temp_m_mean[m_id] = df_morning.groupby('forecast_date')[t_col].mean()
+                temp_a_mean[m_id] = df_afternoon.groupby('forecast_date')[t_col].mean()
+                temp_e_mean[m_id] = df_evening.groupby('forecast_date')[t_col].mean()
+                temp_max[m_id] = df_hourly.groupby('forecast_date')[t_col].max()
+                
+                # --- WINDSNELHEID ---
+                wind_m_max[m_id] = df_morning.groupby('forecast_date')[ws_col].max()
+                wind_a_max[m_id] = df_afternoon.groupby('forecast_date')[ws_col].max()
+                wind_e_max[m_id] = df_evening.groupby('forecast_date')[ws_col].max()
+                
+                # --- WINDRICHTING (Trigonometrisch) ---
+                for df_p, target_df in [(df_morning, dir_m_avg), (df_afternoon, dir_a_avg), (df_evening, dir_e_avg)]:
+                    rad = np.deg2rad(df_p[wd_col])
+                    sin_mean = np.sin(rad).groupby(df_p['forecast_date']).mean()
+                    cos_mean = np.cos(rad).groupby(df_p['forecast_date']).mean()
+                    target_df[m_id] = (np.rad2deg(np.arctan2(sin_mean, cos_mean)) % 360)
 
-        # --- 4. SAMENVATTEN EN CSV'S BOUWEN ---
-        # A. Temperatuur CSV (🟢 .dt.strftime verwijderd omdat het al een string is)
-        t_m = process_ensemble_stats(temp_m_mean, init_date)
-        t_a = process_ensemble_stats(temp_a_mean, init_date)
-        t_e = process_ensemble_stats(temp_e_mean, init_date)
-        t_x = process_ensemble_stats(temp_max, init_date)
+        # --- 3. SAMENVATTEN EN CSV'S BOUWEN ---
+        # A. Temperatuur CSV
+        t_m = process_ensemble_stats(temp_m_mean, init_date).set_index('forecast_date')
+        t_a = process_ensemble_stats(temp_a_mean, init_date).set_index('forecast_date')
+        t_e = process_ensemble_stats(temp_e_mean, init_date).set_index('forecast_date')
+        t_x = process_ensemble_stats(temp_max, init_date).set_index('forecast_date')
         
-        t_final = pd.DataFrame({'init_date': t_m['init_date'], 'forecast_date': t_m['forecast_date'], 'lead_time_days': t_m['lead_time_days']})
+        t_final = pd.DataFrame(index=t_m.index)
+        t_final['init_date'] = t_m['init_date']
+        t_final['lead_time_days'] = t_m['lead_time_days']
         for df_part, p in [(t_m, 'morning_mean'), (t_a, 'afternoon_mean'), (t_e, 'evening_mean'), (t_x, 'daily_max')]:
             for stat in ['low', 'high', 'mean', 'var']:
-                t_final[f'{p}_{stat}'] = df_part[stat].values
+                t_final[f'{p}_{stat}'] = df_part[stat]
+        
+        t_final = t_final.reset_index()
+        t_final = t_final[['init_date', 'forecast_date', 'lead_time_days'] + [c for c in t_final.columns if c not in ['init_date', 'forecast_date', 'lead_time_days']]]
         save_to_csv(t_final.sort_values('lead_time_days'), 'schiphol_temperature_archive.csv')
 
-        # B. Windsnelheid CSV (🟢 .dt.strftime verwijderd)
-        w_m = process_ensemble_stats(wind_m_max, init_date)
-        w_a = process_ensemble_stats(wind_a_max, init_date)
-        w_e = process_ensemble_stats(wind_e_max, init_date)
+        # B. Windsnelheid CSV
+        w_m = process_ensemble_stats(wind_m_max, init_date).set_index('forecast_date')
+        w_a = process_ensemble_stats(wind_a_max, init_date).set_index('forecast_date')
+        w_e = process_ensemble_stats(wind_e_max, init_date).set_index('forecast_date')
         
-        w_final = pd.DataFrame({'init_date': w_m['init_date'], 'forecast_date': w_m['forecast_date'], 'lead_time_days': w_m['lead_time_days']})
+        w_final = pd.DataFrame(index=w_m.index)
+        w_final['init_date'] = w_m['init_date']
+        w_final['lead_time_days'] = w_m['lead_time_days']
         for df_part, p in [(w_m, 'morning_max'), (w_a, 'afternoon_max'), (w_e, 'evening_max')]:
             for stat in ['low', 'high', 'mean', 'var']:
-                w_final[f'{p}_{stat}'] = df_part[stat].values
+                w_final[f'{p}_{stat}'] = df_part[stat]
+                
+        w_final = w_final.reset_index()
+        w_final = w_final[['init_date', 'forecast_date', 'lead_time_days'] + [c for c in w_final.columns if c not in ['init_date', 'forecast_date', 'lead_time_days']]]
         save_to_csv(w_final.sort_values('lead_time_days'), 'schiphol_wind_speed_archive.csv')
 
-        # C. Windrichting CSV (🟢 .dt.strftime verwijderd)
-        d_m = process_ensemble_stats(dir_m_avg, init_date)
-        d_a = process_ensemble_stats(dir_a_avg, init_date)
-        d_e = process_ensemble_stats(dir_e_avg, init_date)
+        # C. Windrichting CSV
+        d_m = process_ensemble_stats(dir_m_avg, init_date).set_index('forecast_date')
+        d_a = process_ensemble_stats(dir_a_avg, init_date).set_index('forecast_date')
+        d_e = process_ensemble_stats(dir_e_avg, init_date).set_index('forecast_date')
         
-        d_final = pd.DataFrame({'init_date': d_m['init_date'], 'forecast_date': d_m['forecast_date'], 'lead_time_days': d_m['lead_time_days']})
+        d_final = pd.DataFrame(index=d_m.index)
+        d_final['init_date'] = d_m['init_date']
+        d_final['lead_time_days'] = d_m['lead_time_days']
         for df_part, p in [(d_m, 'morning_dir'), (d_a, 'afternoon_dir'), (d_e, 'evening_dir')]:
             for stat in ['low', 'high', 'mean', 'var']:
-                d_final[f'{p}_{stat}'] = df_part[stat].values
+                d_final[f'{p}_{stat}'] = df_part[stat]
+                
+        d_final = d_final.reset_index()
+        d_final = d_final[['init_date', 'forecast_date', 'lead_time_days'] + [c for c in d_final.columns if c not in ['init_date', 'forecast_date', 'lead_time_days']]]
         save_to_csv(d_final.sort_values('lead_time_days'), 'schiphol_wind_direction_archive.csv')
 
     except Exception as e:
