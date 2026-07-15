@@ -1,7 +1,6 @@
 import os
 import re
 import csv
-import urllib.request
 from datetime import datetime
 from playwright.sync_api import sync_playwright
 import pdfplumber
@@ -9,32 +8,34 @@ import pdfplumber
 PORTAL_URL = "https://www.public.nm.eurocontrol.int/PUBPORTAL/gateway/spec/index.html"
 CSV_FILE = "nat_tracks_history.csv"
 
-def get_pdf_url():
+def download_network_plan():
     print("Launching headless browser...")
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         page = browser.new_page()
         
-        # Wait until the network is completely idle to ensure the JS portal is fully loaded
         print("Navigating to Eurocontrol portal...")
         page.goto(PORTAL_URL, wait_until="networkidle", timeout=60000)
         
-        print("Waiting for 'Network Plan' element to appear...")
-        # Give it up to 30 seconds to render the link
-        page.wait_for_selector("text=Network Plan", timeout=30000)
+        print("Waiting for 'Network Plan' link to become active...")
+        # We target the actual anchor link (a tag) containing "Network Plan" to bypass the header
+        link_selector = "a:has-text('Network Plan')"
+        page.wait_for_selector(link_selector, timeout=30000)
         
-        link_element = page.locator("text=Network Plan").first
-        pdf_url = link_element.get_attribute("href")
-        
-        if pdf_url and not pdf_url.startswith("http"):
-            pdf_url = page.evaluate("window.location.origin") + pdf_url
+        # Set up a listener for the dynamic browser download event
+        print("Clicking the link and waiting for download stream...")
+        with page.expect_download(timeout=30000) as download_info:
+            page.locator(link_selector).first.click()
             
+        download = download_info.value
+        pdf_filename = "network_plan.pdf"
+        
+        # Save the dynamically downloaded file
+        download.save_as(pdf_filename)
+        print(f"File successfully downloaded and saved to: {pdf_filename}")
+        
         browser.close()
-        
-        if not pdf_url:
-            raise ValueError("Failed to extract href from 'Network Plan' link.")
-            
-        return pdf_url
+        return pdf_filename
 
 def parse_nat_tracks(pdf_path):
     print("Parsing PDF for NAT Tracks...")
@@ -48,6 +49,7 @@ def parse_nat_tracks(pdf_path):
             if text and "NAT Tracks" in text:
                 print(f"Found NAT Tracks information on Page {i+1}...")
                 
+                # Regex match for Eastbound routes and core
                 match_eb = re.search(
                     r"Eastbound published tracks are:\s*(.*?)\s*with a predicted core via\s*(.*)", 
                     text, 
@@ -57,6 +59,7 @@ def parse_nat_tracks(pdf_path):
                     eastbound_routes = match_eb.group(1).strip()
                     core_we_route = match_eb.group(2).strip()
                 
+                # Extract date from the footer (e.g., "Wed 15 Jul 2026")
                 date_match = re.search(r"(\w{3}\s+\d{1,2}\s+\w{3}\s+\d{4})", text)
                 if date_match:
                     try:
@@ -81,20 +84,16 @@ def save_to_csv(date, routes, core):
     print(f"Successfully appended data to {CSV_FILE}")
 
 def main():
-    # Remove the broad try-except so GitHub Actions can detect failures
-    pdf_url = get_pdf_url()
+    # Download via Playwright click event
+    pdf_filename = download_network_plan()
     
-    pdf_filename = "network_plan.pdf"
-    print(f"Target PDF URL: {pdf_url}")
-    urllib.request.urlretrieve(pdf_url, pdf_filename)
-    
+    # Parse the downloaded PDF
     doc_date, eb_routes, core_we = parse_nat_tracks(pdf_filename)
     
     if eb_routes and core_we:
         print(f"Extracted: Date={doc_date} | Routes={eb_routes} | Core={core_we}")
         save_to_csv(doc_date, eb_routes, core_we)
     else:
-        # Throw an error if we found the PDF but could not extract the NAT tracks
         raise ValueError("Could not locate or parse the NAT tracks pattern in the downloaded PDF.")
 
 if __name__ == "__main__":
