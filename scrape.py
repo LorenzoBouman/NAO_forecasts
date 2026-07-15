@@ -8,7 +8,7 @@ from datetime import datetime
 # 1. Configuration & Directories
 PORTAL_URL = "https://www.public.nm.eurocontrol.int/PUBPORTAL/gateway/spec/"
 PDF_TEMP = "temp_network_plan.pdf"
-CSV_PATH = "data/eurocontrol_history.csv"
+CSV_PATH = "eurocontrol_history.csv"
 
 os.makedirs("data", exist_ok=True)
 
