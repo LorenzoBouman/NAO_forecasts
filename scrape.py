@@ -14,56 +14,70 @@ os.makedirs("data", exist_ok=True)
 
 import json
 
+# Portal configurations
+PORTAL_ROOT = "https://www.public.nm.eurocontrol.int/PUBPORTAL/gateway/spec/"
+PORTAL_INDEX = "https://www.public.nm.eurocontrol.int/PUBPORTAL/gateway/spec/index.html"
+
 def find_daily_pdf_url():
     """
-    Directly queries Eurocontrol's public NOP metadata API to fetch 
-    the active path for the Initial Network Plan PDF.
+    Tries multiple entry points on the Eurocontrol portal and uses flexible regex 
+    to extract the dynamic daily Initial Network Plan PDF link.
     """
-    # The direct API endpoint that publishes the configuration for daily plans
-    api_url = "https://www.public.nm.eurocontrol.int/PUBPORTAL/gateway/spec/initial_network_plan"
-    print(f"Querying Eurocontrol API at {api_url}...")
-    
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Accept': 'application/json'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.5'
     }
-    
-    req = urllib.request.Request(api_url, headers=headers)
-    
-    try:
-        with urllib.request.urlopen(req) as response:
-            # Parse the direct JSON response
-            data = json.loads(response.read().decode('utf-8'))
-            
-            # Navigate the JSON structure to find the transient file path
-            # The portal config houses the active PDF resources here
-            resource_path = data.get("resourcePath") or data.get("pdfPath")
-            
-            # Fallback parsing if structure varies slightly
-            if not resource_path and "config" in data:
-                resource_path = data["config"].get("pdfUrl")
-                
-            if not resource_path:
-                # If nested, search raw string values
-                raw_json_str = json.dumps(data)
-                match = re.search(r'_res/\d{8}/\d{8}-\d{6}\.pdf', raw_json_str)
-                if match:
-                    resource_path = match.group(0)
-            
-            if resource_path:
-                # Clean up leading slashes if present
-                resource_path = resource_path.lstrip('/')
-                full_pdf_url = f"https://www.public.nm.eurocontrol.int/PUBPORTAL/gateway/spec/{resource_path}?APPID=initial_network_plan"
-                print(f"Discovered today's dynamic PDF URL: {full_pdf_url}")
-                return full_pdf_url
-                
-            raise ValueError("API returned configuration data, but the specific PDF resource path was missing.")
-            
-    except Exception as e:
-        print(f"Failed parsing API endpoint: {e}. Attempting legacy HTML fallback...")
-        # Keep our original pattern matching as a backup
-        return legacy_html_fallback()
 
+    # We test both URLs since Eurocontrol sometimes routes deep configurations differently
+    target_urls = [PORTAL_INDEX, PORTAL_ROOT]
+    
+    for url in target_urls:
+        print(f"Scanning portal page: {url}...")
+        try:
+            req = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(req, timeout=15) as response:
+                html_content = response.read().decode('utf-8', errors='ignore')
+                
+                # Flexible regex searching for the daily resource directory structure
+                # This matches formats like: _res/20260714/20260714-180449.pdf
+                pdf_pattern = re.compile(r'_res/\d{8}/\d{8}-\d{6}\.pdf', re.IGNORECASE)
+                matches = pdf_pattern.findall(html_content)
+                
+                if matches:
+                    # Select the most recent matched directory link
+                    relative_pdf_path = matches[-1].lstrip('/')
+                    full_pdf_url = f"{PORTAL_ROOT}{relative_pdf_path}?APPID=initial_network_plan"
+                    print(f"Successfully discovered today's dynamic PDF URL: {full_pdf_url}")
+                    return full_pdf_url
+                    
+        except Exception as e:
+            print(f"Warning: Failed scanning {url} due to error: {e}")
+            continue
+
+    # --- DIAGNOSTIC FALLBACK ---
+    # If both fails, let's print out the landing page structure to help debug
+    print("\n--- Scraper Diagnostic Report ---")
+    print(f"Attempting to fetch raw source of {PORTAL_INDEX} for debugging...")
+    try:
+        req = urllib.request.Request(PORTAL_INDEX, headers=headers)
+        with urllib.request.urlopen(req) as response:
+            debug_html = response.read().decode('utf-8', errors='ignore')
+            print("HTML Length:", len(debug_html))
+            print("Beginning of Page Source (First 1000 chars):")
+            print(debug_html[:1000])
+            
+            # Print any scripts or configuration file matches found on the page
+            js_files = re.findall(r'src=["\'](.*?)["\']', debug_html)
+            if js_files:
+                print("\nDiscovered JavaScript files running on this page:")
+                for js in js_files[:5]:
+                    print(f" - {js}")
+    except Exception as debug_err:
+        print("Could not generate diagnostic HTML source:", debug_err)
+    print("---------------------------------\n")
+
+    raise ValueError("Could not resolve dynamic PDF path from any portal landing page.")
 def legacy_html_fallback():
     headers = {'User-Agent': 'Mozilla/5.0'}
     req = urllib.request.Request(PORTAL_URL, headers=headers)
