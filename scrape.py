@@ -85,8 +85,9 @@ def save_to_database(new_records, csv_path):
 
 def main():
     try:
+        test_pdf_url = https://www.public.nm.eurocontrol.int/PUBPORTAL/gateway/spec/_res/20260715/20260715-180949.pdf?APPID=initial_network_plan
         pdf_url = find_daily_pdf_url()
-        download_pdf(pdf_url, PDF_TEMP)
+        download_pdf(test_pdf_url, PDF_TEMP)
         records = extract_and_parse(PDF_TEMP)
         if records:
             save_to_database(records, CSV_PATH)
