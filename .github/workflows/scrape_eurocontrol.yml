@@ -31,7 +31,10 @@ jobs:
       run: |
         git config --global user.name "github-actions[bot]"
         git config --global user.email "github-actions[bot]@users.noreply.github.com"
-        git add data/*.csv
-        # Only commit if changes were actually made to prevent errors
-        git diff-index --quiet HEAD || git commit -m "Auto-update: Daily Eurocontrol Scraper Run"
-        git push
+        # Check if the file actually exists before running git ad
+        if [ -f "data/eurocontrol_history.csv" ]; then
+          git add data/eurocontrol_history.csv
+          git diff-index --quiet HEAD || (git commit -m "Auto-update: Daily Eurocontrol Scraper Run" && git push)
+        else
+          echo "No CSV file was created by the script, skipping git commit."
+        fi
