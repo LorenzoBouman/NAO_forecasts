@@ -1,0 +1,36 @@
+name: Daily Eurocontrol NAT Scraper
+
+on:
+  schedule:
+    # Runs daily at 18:15 UTC
+    - cron: '15 18 * * *'
+  workflow_dispatch: # Allows you to run it manually from the Actions tab
+
+jobs:
+  scrape_and_parse:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-style: '3.10'
+        cache: 'pip'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install playwright pdfplumber
+        playwright install chromium
+
+    - name: Run Scraper
+      run: python scraper.py
+
+    - name: Upload parsed summary
+      uses: actions/upload-artifact@v4
+      with:
+        name: nat-tracks-summary
+        path: nat_tracks_summary.txt
