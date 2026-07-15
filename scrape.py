@@ -95,6 +95,7 @@ def main():
             print("No records matched the scraping rules today.")
     except Exception as e:
         print(f"Error executing scraper: {e}")
+        raise e
     finally:
         if os.path.exists(PDF_TEMP):
             os.remove(PDF_TEMP)
