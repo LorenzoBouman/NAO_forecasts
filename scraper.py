@@ -1,10 +1,13 @@
 import os
 import re
+import csv
 import urllib.request
+from datetime import datetime
 from playwright.sync_api import sync_playwright
 import pdfplumber
 
 PORTAL_URL = "https://www.public.nm.eurocontrol.int/PUBPORTAL/gateway/spec/index.html"
+CSV_FILE = "nat_tracks_history.csv"
 
 def get_pdf_url():
     print("Launching headless browser...")
@@ -13,15 +16,12 @@ def get_pdf_url():
         page = browser.new_page()
         page.goto(PORTAL_URL)
         
-        # Wait for the "Initial Network Plan" portlet and the "Network Plan" link to load
         print("Waiting for 'Network Plan' element to appear...")
         page.wait_for_selector("text=Network Plan")
         
-        # Extract the href attribute of the 'Network Plan' element
         link_element = page.locator("text=Network Plan").first
         pdf_url = link_element.get_attribute("href")
         
-        # If the href is relative, resolve it against the base URL
         if pdf_url and not pdf_url.startswith("http"):
             pdf_url = page.evaluate("window.location.origin") + pdf_url
             
@@ -32,6 +32,7 @@ def parse_nat_tracks(pdf_path):
     print("Parsing PDF for NAT Tracks...")
     eastbound_routes = None
     core_we_route = None
+    doc_date = None
     
     with pdfplumber.open(pdf_path) as pdf:
         for i, page in enumerate(pdf.pages):
@@ -39,8 +40,7 @@ def parse_nat_tracks(pdf_path):
             if text and "NAT Tracks" in text:
                 print(f"Found NAT Tracks information on Page {i+1}...")
                 
-                # Regex match for Eastbound routes and core
-                # Example: "Eastbound published tracks are: PIKIL 56N to LIMRI 52N with a predicted core via DOGAL 54N"
+                # Extract the published Eastbound routes and core 
                 match_eb = re.search(
                     r"Eastbound published tracks are:\s*(.*?)\s*with a predicted core via\s*(.*)", 
                     text, 
@@ -49,9 +49,35 @@ def parse_nat_tracks(pdf_path):
                 if match_eb:
                     eastbound_routes = match_eb.group(1).strip()
                     core_we_route = match_eb.group(2).strip()
-                    break
-                    
-    return eastbound_routes, core_we_route
+                
+                # Extract date from footer (e.g., "Wed 15 Jul 2026") [cite: 38]
+                date_match = re.search(r"(\w{3}\s+\d{1,2}\s+\w{3}\s+\d{4})", text)
+                if date_match:
+                    try:
+                        parsed_date = datetime.strptime(date_match.group(1), "%a %d %b %Y")
+                        doc_date = parsed_date.strftime("%Y-%m-%d")
+                    except ValueError:
+                        pass
+                break
+                
+    # Fallback to current system date if extraction fails
+    if not doc_date:
+        doc_date = datetime.utcnow().strftime("%Y-%m-%d")
+        
+    return doc_date, eastbound_routes, core_we_route
+
+def save_to_csv(date, routes, core):
+    file_exists = os.path.exists(CSV_FILE)
+    
+    # Append row to the CSV
+    with open(CSV_FILE, mode="a", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        if not file_exists:
+            # Write header if file is brand new
+            writer.writerow(["Date", "West-to-East Routes", "Core W-E Route"])
+        
+        writer.writerow([date, routes, core])
+    print(f"Successfully appended data to {CSV_FILE}")
 
 def main():
     try:
@@ -60,30 +86,17 @@ def main():
             print("Error: Could not retrieve the Network Plan PDF URL.")
             return
         
-        print(f"Target PDF URL found: {pdf_url}")
-        
-        # Download the PDF
         pdf_filename = "network_plan.pdf"
-        print("Downloading PDF...")
+        print(f"Target PDF URL: {pdf_url}")
         urllib.request.urlretrieve(pdf_url, pdf_filename)
-        print("Download complete.")
         
-        # Parse NAT Tracks
-        eb_routes, core_we = parse_nat_tracks(pdf_filename)
+        doc_date, eb_routes, core_we = parse_nat_tracks(pdf_filename)
         
         if eb_routes and core_we:
-            print("\n--- EXTRACTED DATA ---")
-            print(f"West-to-East Routes: {eb_routes}")
-            print(f"Core W-E Route:      {core_we}")
-            print("----------------------\n")
-            
-            # Save output to a file (optional - useful for GitHub Action artifacts)
-            with open("nat_tracks_summary.txt", "w") as f:
-                f.write(f"Date: {pdf_url.split('/')[-2]}\n")
-                f.write(f"West-to-East Routes: {eb_routes}\n")
-                f.write(f"Core W-E Route: {core_we}\n")
+            print(f"Extracted: Date={doc_date} | Routes={eb_routes} | Core={core_we}")
+            save_to_csv(doc_date, eb_routes, core_we)
         else:
-            print("Could not locate or parse the NAT tracks pattern in the downloaded PDF.")
+            print("Could not locate or parse the NAT tracks pattern in the PDF.")
             
     except Exception as e:
         print(f"An error occurred: {e}")
