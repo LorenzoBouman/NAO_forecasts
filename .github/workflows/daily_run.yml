@@ -30,9 +30,6 @@ jobs:
 
     - name: Start Schiphol Script
       run: python fetch_schiphol.py
-      
-    - name: Start backfill
-      run: python backfill_schiphol.py
 
     - name: Wijzigingen opslaan en pushen naar GitHub
       run: |
