@@ -14,10 +14,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - name: Code ophalen uit repository
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
 
     - name: Python instellen
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: '3.10'
 
@@ -35,6 +35,16 @@ jobs:
       run: |
         git config --global user.name "GitHub Action"
         git config --global user.email "actions@github.com"
-        git add *.csv || true
-        git commit -m "Automatische dagelijkse update: NOAA & Schiphol" || true
-        git push || true
+        
+        # Stage ALLE gewijzigde en nieuwe bestanden, ook in submappen
+        git add -A
+        
+        # Check of er daadwerkelijk wijzigingen zijn
+        if [ -n "$(git status --porcelain)" ]; then
+          echo "Gewijzigde bestanden gevonden:"
+          git status --short
+          git commit -m "Automatische dagelijkse update: NOAA & Schiphol [skip ci]"
+          git push
+        else
+          echo "Geen wijzigingen gedetecteerd door Git. Controleer of fetch_schiphol.py naar disk schrijft."
+        fi
