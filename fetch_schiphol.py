@@ -87,23 +87,44 @@ if dir_cols:
     df_weather["wind_slot_dir_var"]  = circ_var
 
 # =========================================================================
-# 4. HULPFUNCTIE VOOR HET UPDATEN EN OPSLAAN VAN DE ARCHIEVEN
+# 4. HULPFUNCTIE VOOR HET UPDATEN MET DYNAMISCHE KOLOMDETECTIE
 # =========================================================================
 def update_archive(file_path, new_df, subset_cols):
+    if not os.path.exists(file_path):
+        print(f"Bestand {file_path} bestaat nog niet, nieuw aangemaakt.")
+        new_df[["forecast_time"] + subset_cols].to_csv(file_path, index=False)
+        return
+
+    existing_df = pd.read_csv(file_path)
+
+    # Detecteer automatisch hoe de datum/tijdkolom heet in het bestaande bestand
+    possible_time_cols = ["forecast_time", "time", "datetime", "date", "timestamp"]
+    target_time_col = None
+    for col in possible_time_cols:
+        if col in existing_df.columns:
+            target_time_col = col
+            break
+
+    if target_time_col is None:
+        target_time_col = existing_df.columns[0]
+        print(f"Waarschuwing: Geen bekende tijdkolom gevonden in {file_path}. Eerste kolom gekozen: '{target_time_col}'")
+
+    # Hernoem forecast_time naar de bestaande kolomnaam voor consistentie
     data_to_add = new_df[["forecast_time"] + subset_cols].copy()
-    
-    if os.path.exists(file_path):
-        existing_df = pd.read_csv(file_path)
-        existing_df["forecast_time"] = pd.to_datetime(existing_df["forecast_time"])
-        combined_df = pd.concat([existing_df, data_to_add], ignore_index=True)
-        # Behoud de nieuwste run bij overlappende forecast_time
-        combined_df = combined_df.drop_duplicates(subset=["forecast_time"], keep="last")
-        combined_df = combined_df.sort_values("forecast_time").reset_index(drop=True)
-    else:
-        combined_df = data_to_add
-        
+    data_to_add.rename(columns={"forecast_time": target_time_col}, inplace=True)
+
+    # Converteer naar datetime voor correcte ontdubbeling en sortering
+    existing_df[target_time_col] = pd.to_datetime(existing_df[target_time_col])
+    data_to_add[target_time_col] = pd.to_datetime(data_to_add[target_time_col])
+
+    # Combineren, duplicaten filteren (nieuwste waarden behouden) en sorteren
+    combined_df = pd.concat([existing_df, data_to_add], ignore_index=True)
+    combined_df = combined_df.drop_duplicates(subset=[target_time_col], keep="last")
+    combined_df = combined_df.sort_values(target_time_col).reset_index(drop=True)
+
+    # Opslaan
     combined_df.to_csv(file_path, index=False)
-    print(f"Opgeslagen: {file_path} ({len(combined_df)} rijen)")
+    print(f"Succesvol bijgewerkt: {file_path} (Totaal rijen: {len(combined_df)}, tijdkolom: '{target_time_col}')")
 
 # =========================================================================
 # 5. WEGSCHRIJVEN NAAR DE 3 SCHIPHOL ARCHIEF BESTANDEN
@@ -120,4 +141,4 @@ update_archive("schiphol_wind_direction_archive.csv", df_weather, wind_dir_cols)
 wind_speed_cols = ["wind_slot_max_mean", "wind_slot_gust_mean"]
 update_archive("schiphol_wind_speed_archive.csv", df_weather, wind_speed_cols)
 
-print("Klaar! Alle Schiphol bestanden zijn succesvol bijgewerkt.")
+print("Klaar! Alle Schiphol archieven zijn succesvol weggeschreven.")
