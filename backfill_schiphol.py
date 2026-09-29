@@ -7,13 +7,13 @@ from datetime import datetime
 LAT = "52.3081"
 LON = "4.7642"
 
-# past_days=10 reikt nu wél ver genoeg terug om 2026-09-23 en 2026-09-24 volledig te dekken
+# past_days=11 zorgt voor een ruime buffer voor 2026-09-23 en 2026-09-24
 URL = (
     f"https://ensemble-api.open-meteo.com/v1/ensemble?"
     f"latitude={LAT}&longitude={LON}&"
     f"hourly=temperature_2m,wind_speed_10m,wind_direction_10m,wind_gusts_10m&"
     f"models=ecmwf_ifs025&wind_speed_unit=kn&"
-    f"past_days=10&forecast_days=8"
+    f"past_days=11&forecast_days=8"
 )
 
 TARGET_INIT_DATES = ["2026-09-22", "2026-09-23"]
@@ -56,23 +56,35 @@ def fill_only_missing(new_df, filename):
         print(f"{filename} niet gevonden.")
         return
         
-    master_df = pd.read_csv(filename)
+    # 1. Lees CSV in en dwing alle lege strings/spaties expliciet af als NaN
+    master_df = pd.read_csv(filename, keep_default_na=True, na_values=['', ' ', 'nan', 'NaN'])
     
-    # Gebruik (init_date, forecast_date) als unieke sleutel
-    master_df = master_df.set_index(['init_date', 'forecast_date'])
-    new_df = new_df.set_index(['init_date', 'forecast_date'])
+    key_cols = ['init_date', 'forecast_date']
     
-    # combine_first vult ALLEEN aan waar master_df leeg (NaN) is!
-    repaired_df = master_df.combine_first(new_df).reset_index()
+    # 2. Filter new_df op rijen die ook daadwerkelijk numerieke data bevatten
+    valid_new_df = new_df.dropna(subset=[c for c in new_df.columns if c not in key_cols], how='all')
     
-    # Sortering behouden zoals in originele pipeline
+    # 3. Koppel op basis van de unieke sleutel
+    master_indexed = master_df.set_index(key_cols)
+    new_indexed = valid_new_df.set_index(key_cols)
+    
+    # Alleen lege cellen overschrijven met de nieuw berekende data
+    master_indexed.update(new_indexed, overwrite=False)
+    repaired_df = master_indexed.combine_first(new_indexed).reset_index()
+    
+    # 4. Consistentie van lead_time_days waarborgen en sorteren
+    repaired_df['lead_time_days'] = (
+        pd.to_datetime(repaired_df['forecast_date']) - pd.to_datetime(repaired_df['init_date'])
+    ).dt.days
     repaired_df = repaired_df.sort_values(by=['init_date', 'lead_time_days']).reset_index(drop=True)
+    
     repaired_df.to_csv(filename, index=False)
     print(f"Reparatie voltooid voor: {filename}")
 
 def run_repair():
-    print("Ophalen data met past_days=10...")
-    res = requests.get(URL)
+    print("Ophalen data met past_days=11...")
+    res = requests.get(URL, timeout=30)
+    res.raise_for_status()
     df_hourly = pd.DataFrame(res.json()["hourly"])
     df_hourly['time'] = pd.to_datetime(df_hourly['time'])
     df_hourly['forecast_date'] = df_hourly['time'].dt.strftime('%Y-%m-%d')
@@ -168,10 +180,18 @@ def run_repair():
                 d_final[f'{p}_{stat}'] = df_part[stat]
         d_chunks.append(d_final.reset_index())
 
-    # Voer gerichte invulling uit via combine_first
+    # Voer gerichte invulling uit
     fill_only_missing(pd.concat(t_chunks, ignore_index=True), 'schiphol_temperature_archive.csv')
     fill_only_missing(pd.concat(w_chunks, ignore_index=True), 'schiphol_wind_speed_archive.csv')
     fill_only_missing(pd.concat(d_chunks, ignore_index=True), 'schiphol_wind_direction_archive.csv')
+
+    # =========================================================================
+    # DEBUG CONTROLE IN ACTIONS LOGS
+    # =========================================================================
+    check_temp = pd.read_csv('schiphol_temperature_archive.csv', keep_default_na=True, na_values=['', ' ', 'nan', 'NaN'])
+    sub = check_temp[check_temp['init_date'].isin(TARGET_INIT_DATES)]
+    print("\n--- STATUS CHECK IN CSV (init_date 2026-09-22 en 2026-09-23) ---")
+    print(sub[['init_date', 'forecast_date', 'lead_time_days', 'morning_mean_mean']].to_string(index=False))
 
 if __name__ == "__main__":
     run_repair()
