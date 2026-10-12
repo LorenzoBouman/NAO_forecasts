@@ -10,7 +10,7 @@ LON = "4.7642"
 HIST_URL = (
     f"https://historical-forecast-api.open-meteo.com/v1/forecast?"
     f"latitude={LAT}&longitude={LON}&"
-    f"start_date=2026-09-23&end_date=2026-09-24&"
+    f"start_date=2026-10-05&end_date=2026-10-12&"
     f"hourly=temperature_2m,wind_speed_10m,wind_direction_10m,wind_gusts_10m&"
     f"models=ecmwf_ifs025&wind_speed_unit=kn"
 )
@@ -57,12 +57,8 @@ def calc_circ(df_slice, cols):
     std_deg = np.minimum(np.rad2deg(np.sqrt(-2 * np.log(np.clip(R, 1e-6, 1.0)))), 180.0)
     return (mean_deg - std_deg) % 360, (mean_deg + std_deg) % 360, mean_deg, var
 
-# De 3 doelsleutels die NaN zijn
-missing_keys = [
-    ("2026-09-22", "2026-09-23"),
-    ("2026-09-22", "2026-09-24"),
-    ("2026-09-23", "2026-09-24")
-]
+# We maken alleen combinaties voor init_date 2026-10-05 (met 8 dagen horizon)
+missing_keys = [("2026-10-05", f"2026-10-{day:02d}") for day in range(5, 13)]
 
 # Bereken de stats per datum (2026-09-23 en 2026-09-24)
 dates_data = {}
@@ -107,20 +103,33 @@ for f_date in ["2026-09-23", "2026-09-24"]:
 
     dates_data[f_date] = {'temp': t_vals, 'wind': w_vals, 'dir': d_vals}
 
-# Functie om direct in de master CSV te patchen
 def patch_file(filename, category):
     if not os.path.exists(filename):
         return
+        
     df = pd.read_csv(filename, keep_default_na=True, na_values=['', ' ', 'nan', 'NaN'])
+    
     for init_d, f_d in missing_keys:
         mask = (df['init_date'] == init_d) & (df['forecast_date'] == f_d)
-        if mask.any() and f_d in dates_data:
+        
+        # Voeg de rij toe als deze nog niet bestaat
+        if not mask.any():
+            lead_time = (pd.to_datetime(f_d) - pd.to_datetime(init_d)).days
+            new_row_df = pd.DataFrame([{'init_date': init_d, 'forecast_date': f_d, 'lead_time_days': lead_time}])
+            df = pd.concat([df, new_row_df], ignore_index=True)
+            mask = (df['init_date'] == init_d) & (df['forecast_date'] == f_d)
+            
+        # Vul de berekende waarden in
+        if f_d in dates_data:
             vals = dates_data[f_d][category]
             for col, val in vals.items():
                 if col in df.columns:
                     df.loc[mask, col] = val
+                    
+    # Sorteer op datum zodat 5 oktober netjes tussen 4 en 6 oktober belandt
+    df = df.sort_values(by=['init_date', 'forecast_date']).reset_index(drop=True)
     df.to_csv(filename, index=False)
-    print(f"Gepatched: {filename}")
+    print(f"Gepatched & Gesorteerd: {filename}")
 
 patch_file("schiphol_temperature_archive.csv", "temp")
 patch_file("schiphol_wind_speed_archive.csv", "wind")
