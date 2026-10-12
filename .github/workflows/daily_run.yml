@@ -30,7 +30,10 @@ jobs:
 
     - name: Start Schiphol Script
       run: python fetch_schiphol.py
-
+      
+    - name: Start Backfill Schiphol Script
+      run: python backfill_schiphol.py
+      
     - name: Wijzigingen opslaan en pushen naar GitHub
       run: |
         git config --global user.name "GitHub Action"
