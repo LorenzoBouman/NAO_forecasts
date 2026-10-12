@@ -6,16 +6,16 @@ import numpy as np
 LAT = "52.3081"
 LON = "4.7642"
 
-# Het historische archief-endpoint voor ECMWF IFS runs
+# Aangepaste URL: we gebruiken de standaard API voor recente geschiedenis (afgelopen maanden)
 HIST_URL = (
-    f"https://historical-forecast-api.open-meteo.com/v1/forecast?"
+    f"https://api.open-meteo.com/v1/forecast?"
     f"latitude={LAT}&longitude={LON}&"
     f"start_date=2026-10-05&end_date=2026-10-12&"
     f"hourly=temperature_2m,wind_speed_10m,wind_direction_10m,wind_gusts_10m&"
     f"models=ecmwf_ifs025&wind_speed_unit=kn"
 )
 
-# 1. Data ophalen
+print("Data ophalen van API...")
 res = requests.get(HIST_URL, timeout=30)
 res.raise_for_status()
 hourly = res.json()["hourly"]
@@ -29,18 +29,16 @@ df_m = df_h[(df_h['hour'] >= 6) & (df_h['hour'] < 12)]
 df_a = df_h[(df_h['hour'] >= 12) & (df_h['hour'] < 18)]
 df_e = df_h[(df_h['hour'] >= 18) & (df_h['hour'] < 24)]
 
-# Leden detecteren (of single model fallback indien al geaggregeerd)
 temp_cols = [c for c in df_h.columns if c.startswith("temperature_2m")]
 ws_cols   = [c for c in df_h.columns if c.startswith("wind_speed_10m")]
 wd_cols   = [c for c in df_h.columns if c.startswith("wind_direction_10m")]
 wg_cols   = [c for c in df_h.columns if c.startswith("wind_gusts_10m")]
 
+# Veilige rekenfuncties (vangen lege arrays op)
 def calc_lin(df_slice, cols, stat_func):
     matrix = df_slice[cols].values
-
     if matrix.size == 0:
         return np.nan
-        
     if stat_func == 'mean':
         return np.nanmean(matrix)
     elif stat_func == 'min':
@@ -52,6 +50,8 @@ def calc_lin(df_slice, cols, stat_func):
 
 def calc_circ(df_slice, cols):
     matrix = df_slice[cols].values
+    if matrix.size == 0:
+        return np.nan, np.nan, np.nan, np.nan
     rad = np.deg2rad(matrix)
     X = np.nanmean(np.cos(rad))
     Y = np.nanmean(np.sin(rad))
@@ -61,12 +61,12 @@ def calc_circ(df_slice, cols):
     std_deg = np.minimum(np.rad2deg(np.sqrt(-2 * np.log(np.clip(R, 1e-6, 1.0)))), 180.0)
     return (mean_deg - std_deg) % 360, (mean_deg + std_deg) % 360, mean_deg, var
 
-# We maken alleen combinaties voor init_date 2026-10-05 (met 8 dagen horizon)
+# Definieer de ontbrekende sleutels voor 5 oktober (met 8 dagen horizon)
 missing_keys = [("2026-10-05", f"2026-10-{day:02d}") for day in range(5, 13)]
-
-# Bereken de stats per datum (2026-09-23 en 2026-09-24)
+target_dates = [f"2026-10-{day:02d}" for day in range(5, 13)]
 dates_data = {}
-for f_date in ["2026-09-23", "2026-09-24"]:
+
+for f_date in target_dates:
     sub_m = df_m[df_m['forecast_date'] == f_date]
     sub_a = df_a[df_a['forecast_date'] == f_date]
     sub_e = df_e[df_e['forecast_date'] == f_date]
@@ -109,38 +109,35 @@ for f_date in ["2026-09-23", "2026-09-24"]:
 
 def patch_file(filename, category):
     if not os.path.exists(filename):
+        print(f"Bestand {filename} niet gevonden, wordt overgeslagen.")
         return
-        
-    df = pd.read_csv(filename, keep_default_na=True, na_values=['', ' ', 'nan', 'NaN'])
+    
+    # We laden de dataset in. 'nan' waarden worden goed herkend
+    df = pd.read_csv(filename, keep_default_na=True)
     
     for init_d, f_d in missing_keys:
         mask = (df['init_date'] == init_d) & (df['forecast_date'] == f_d)
         
-        # Voeg de rij toe als deze nog niet bestaat
+        # Als de rij er niet is, voegen we hem toe
         if not mask.any():
             lead_time = (pd.to_datetime(f_d) - pd.to_datetime(init_d)).days
             new_row_df = pd.DataFrame([{'init_date': init_d, 'forecast_date': f_d, 'lead_time_days': lead_time}])
             df = pd.concat([df, new_row_df], ignore_index=True)
             mask = (df['init_date'] == init_d) & (df['forecast_date'] == f_d)
             
-        # Vul de berekende waarden in
+        # Overschrijf de waarden (vult de NaN's nu in met de échte data)
         if f_d in dates_data:
             vals = dates_data[f_d][category]
             for col, val in vals.items():
-                if col in df.columns:
+                if col in df.columns or category in ["wind", "temp", "dir"]: # Zorgt dat kolommen bestaan
                     df.loc[mask, col] = val
                     
-    # Sorteer op datum zodat 5 oktober netjes tussen 4 en 6 oktober belandt
+    # Sorteer netjes op datums
     df = df.sort_values(by=['init_date', 'forecast_date']).reset_index(drop=True)
     df.to_csv(filename, index=False)
     print(f"Gepatched & Gesorteerd: {filename}")
 
+# Patch de drie bestanden, waaronder wind speed
 patch_file("schiphol_temperature_archive.csv", "temp")
 patch_file("schiphol_wind_speed_archive.csv", "wind")
 patch_file("schiphol_wind_direction_archive.csv", "dir")
-
-# Verificatie
-check = pd.read_csv("schiphol_temperature_archive.csv")
-sub = check[check['init_date'].isin(["2026-09-22", "2026-09-23"])]
-print("\n--- RESULTAAT NA PATCH ---")
-print(sub[['init_date', 'forecast_date', 'lead_time_days', 'morning_mean_mean']].to_string(index=False))
