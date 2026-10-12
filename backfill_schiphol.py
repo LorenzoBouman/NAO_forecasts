@@ -37,6 +37,10 @@ wg_cols   = [c for c in df_h.columns if c.startswith("wind_gusts_10m")]
 
 def calc_lin(df_slice, cols, stat_func):
     matrix = df_slice[cols].values
+
+    if matrix.size == 0:
+        return np.nan
+        
     if stat_func == 'mean':
         return np.nanmean(matrix)
     elif stat_func == 'min':
